@@ -101,7 +101,7 @@ class JsonCRUDView(JsonSingleObjectView):
         obj.delete()
         return self.render_to_response({'id': pk})
 
-    def create_or_update_object(obj=None):
+    def create_or_update_object(self, obj=None):
         if obj is None:
             obj = self.model()
         if self.allowed_params is None:
@@ -115,7 +115,7 @@ class JsonCRUDView(JsonSingleObjectView):
         # ex. '2020-08-21...' in DateTimeField becomes datetime.datetime
         return self.model.objects.get(pk=obj.pk)
 
-    def assert_pk_specified(**kwargs):
+    def assert_pk_specified(self, **kwargs):
         if self.pk_url_kwarg not in kwargs:
             self.raise_public_error(
                 f'{self.pk_url_kwarg} is not specified'
