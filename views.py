@@ -3,6 +3,7 @@ from django.views.generic.base import View
 from django.views.generic.detail import SingleObjectMixin
 from django.views.generic.list import MultipleObjectMixin
 from django.core.exceptions import SuspiciousOperation
+from django.db.models.query import QuerySet
 import logging
 
 import json
@@ -26,7 +27,7 @@ class JsonBaseView(View):
                 key: self.as_serializable(value)
                 for key, value in obj.items()
             }
-        elif type(obj) == list:
+        elif type(obj) == list or isinstance(obj, QuerySet):
             return [
                 self.as_serializable(value)
                 for value in obj
@@ -38,21 +39,40 @@ class JsonBaseView(View):
         try: 
             obj = super().dispatch(*args, **kwargs)
             return JsonResponse({
-                'payload': obj
+                'payload': self.as_serializable(obj)
             })
         except PublicError as e:
             return JsonResponse({
                 'error': str(e)
             })
-        except Exception as e:
-            logging.info(e)
+        # except Exception as e:
+        #     logging.info(e)
+        #     print(e)
+        #     e.stacktrace()
+        #     return JsonResponse({
+        #         'error': 'internal server error occured'
+        #     })
 
 class JsonListView(JsonBaseView, MultipleObjectMixin):
-    def get_objects(self, request, *args, **kwargs):
+    def get_objects(self):
+        # modified django's BaseListView.get
+        # https://github.com/django/django/blob/master/django/views/generic/list.py#L139
+        self.object_list = self.get_queryset()
+        allow_empty = self.get_allow_empty()
+
+        if not allow_empty:
+            if self.get_paginate_by(self.object_list) is not None and hasattr(self.object_list, 'exists'):
+                is_empty = not self.object_list.exists()
+            else:
+                is_empty = not self.object_list
+            if is_empty:
+                raise Http404(_('Empty list and “%(class_name)s.allow_empty” is False.') % {
+                    'class_name': self.__class__.__name__,
+                })
         context = self.get_context_data()
         return context['object_list']
 
-    def get(self):
+    def get(self, request, *args, **kwargs):
         return self.get_objects()
 
 class JsonSingleObjectView(JsonBaseView, SingleObjectMixin):
