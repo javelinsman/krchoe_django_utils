@@ -1,15 +1,38 @@
 from django.http import JsonResponse
 from django.views.generic.base import View
 from django.views.generic.detail import SingleObjectMixin
+from django.views.generic.list import MultipleObjectMixin
 from django.core.exceptions import SuspiciousOperation
-from django.views.generic.list import BaseListView
+import logging
 
 import json
+
+class PublicError(SuspiciousOperation):
+    pass
 
 class JsonBaseView(View):
     @property
     def form_data(self):
         return json.loads(self.request.body)
+
+    def raise_public_error(self, message):
+        raise PublicError(message)
+
+    def as_serializable(self, obj):
+        if hasattr(obj, 'as_dict'):
+            return obj.as_dict()
+        elif type(obj) == dict:
+            return {
+                key: self.as_serializable(value)
+                for key, value in obj.items()
+            }
+        elif type(obj) == list:
+            return [
+                self.as_serializable(value)
+                for value in obj
+            ]
+        else:
+            return obj
 
     def dispatch(self, *args, **kwargs):
         try: 
@@ -17,74 +40,66 @@ class JsonBaseView(View):
             return JsonResponse({
                 'payload': obj
             })
-        except Exception as e:
+        except PublicError as e:
             return JsonResponse({
                 'error': str(e)
             })
+        except Exception as e:
+            logging.info(e)
 
-class JsonListView(BaseListView):
-    def render_to_response(self, context, **response_kwargs):
-        return JsonResponse({
-            'payload': self.as_serializable(
-                context['object_list']
-            ),
-            **response_kwargs
-        })
+class JsonListView(JsonBaseView, MultipleObjectMixin):
+    def get_objects(self, request, *args, **kwargs):
+        context = self.get_context_data()
+        return context['object_list']
 
-    def as_serializable(self, model_objects):
-        return [
-            model_object.as_dict()
-            for model_object in model_objects
-        ]
+    def get(self):
+        return self.get_objects()
 
-class JsonCRUDView(SingleObjectMixin, View):
-    def render_to_response(self, context, **response_kwargs):
-        return JsonResponse({
-            'payload': self.as_serializable(context),
-            **response_kwargs
-        })
+class JsonSingleObjectView(JsonBaseView, SingleObjectMixin):
+    # you can use self.get_object() defined in SingleObjectMixin
+    pass
 
-    def as_serializable(self, model_object):
-        if type(model_object) == dict:
-            return model_object
-        return model_object.as_dict()
-
-    def get_form_data(self, request):
-        return json.loads(request.body)
-
-    def raise_400(self):
-        raise SuspiciousOperation()
+class JsonCRUDView(JsonSingleObjectView):
+    allowed_params = None
 
     def get(self, request, *args, **kwargs):
-        if self.pk_url_kwarg not in kwargs:
-            self.raise_400()
-        return self.render_to_response(self.get_object())
+        self.assert_pk_specified(**kwargs)
+        return self.get_object()
 
     def post(self, request, *args, **kwargs):
-        obj = self.model(**self.get_form_data(request))
-        self.object = obj
-        self.object.save()
-        obj_retrieved_again = self.model.objects.get(pk=self.object.pk)
-        return self.render_to_response(obj_retrieved_again)
+        return self.create_or_update_object()
 
     def put(self, request, *args, **kwargs):
-        if self.pk_url_kwarg not in kwargs:
-            self.raise_400()
+        self.assert_pk_specified(**kwargs)
         obj = self.get_object()
-        form_data = self.get_form_data(request)
-        for key, value in form_data.items():
-            setattr(obj, key, value)
-        obj.save()
-        obj_retrieved_again = self.model.objects.get(pk=obj.pk)
-        return self.render_to_response(obj_retrieved_again)
+        return self.create_or_update_object(obj)
 
     def delete(self, request, *args, **kwargs):
-        if self.pk_url_kwarg not in kwargs:
-            self.raise_400()
+        self.assert_pk_specified(**kwargs)
         pk = kwargs[self.pk_url_kwarg]
         obj = self.get_object()
         obj.delete()
         return self.render_to_response({'id': pk})
+
+    def create_or_update_object(obj=None):
+        if obj is None:
+            obj = self.model()
+        if self.allowed_params is None:
+            for key, value in form_data.items():
+                setattr(obj, key, value)
+        else:
+            for key, value in form_data.items():
+                if key in self.allowed_params:
+                    setattr(obj, key, value)
+        # object should be retrieved again to have it in standard form
+        # ex. '2020-08-21...' in DateTimeField becomes datetime.datetime
+        return self.model.objects.get(pk=obj.pk)
+
+    def assert_pk_specified(**kwargs):
+        if self.pk_url_kwarg not in kwargs:
+            self.raise_public_error(
+                f'{self.pk_url_kwarg} is not specified'
+            )
 
 class JsonRelationCRUDView(SingleObjectMixin, View):
     target_model = None
