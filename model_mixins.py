@@ -3,6 +3,10 @@ import json
 
 class Serializable:
     def as_dict(self):
-        return json.loads(
+        obj = json.loads(
             serialize('json', [self])
         )[0]
+        return {
+            **obj['fields'],
+            'pk': obj['pk']
+        }
