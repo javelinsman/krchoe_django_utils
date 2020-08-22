@@ -4,6 +4,7 @@ from django.views.generic.detail import SingleObjectMixin
 from django.views.generic.list import MultipleObjectMixin
 from django.core.exceptions import SuspiciousOperation
 from django.db.models.query import QuerySet
+from django.utils.datastructures import MultiValueDict
 import logging
 
 import json
@@ -14,7 +15,13 @@ class PublicError(SuspiciousOperation):
 class JsonBaseView(View):
     @property
     def form_data(self):
-        return json.loads(self.request.body)
+        standard_params = MultiValueDict({
+            **self.request.GET,
+            **self.request.POST,
+            **self.request.FILES
+        })
+        return standard_params
+        # return json.loads(self.request.body)
 
     def raise_public_error(self, message):
         raise PublicError(message)
@@ -79,6 +86,15 @@ class JsonSingleObjectView(JsonBaseView, SingleObjectMixin):
     # you can use self.get_object() defined in SingleObjectMixin
     pass
 
+
+'''
+    It treats POST with pk as PUT
+    because django does not provide enough utility
+    for PUT requests on purpose.
+
+    To implement proper POST and PUT api,
+    django_rest_framework looks better
+'''
 class JsonCRUDView(JsonSingleObjectView):
     allowed_params = None
 
@@ -86,11 +102,13 @@ class JsonCRUDView(JsonSingleObjectView):
         self.assert_pk_specified(**kwargs)
         return self.get_object()
 
-    def post(self, request, *args, **kwargs):
-        return self.create_or_update_object()
+    def get_object(self):
+        if self.pk_url_kwarg not in self.kwargs:
+            return self.model()
+        else:
+            return super().get_object()
 
-    def put(self, request, *args, **kwargs):
-        self.assert_pk_specified(**kwargs)
+    def post(self, request, *args, **kwargs):
         obj = self.get_object()
         return self.create_or_update_object(obj)
 
@@ -99,20 +117,19 @@ class JsonCRUDView(JsonSingleObjectView):
         pk = kwargs[self.pk_url_kwarg]
         obj = self.get_object()
         obj.delete()
-        return self.render_to_response({'id': pk})
+        return {'id': pk}
 
-    def create_or_update_object(self, obj=None):
-        if obj is None:
-            obj = self.model()
+    def create_or_update_object(self, obj):
         if self.allowed_params is None:
-            for key, value in form_data.items():
+            for key, value in self.form_data.items():
                 setattr(obj, key, value)
         else:
-            for key, value in form_data.items():
+            for key, value in self.form_data.items():
                 if key in self.allowed_params:
                     setattr(obj, key, value)
         # object should be retrieved again to have it in standard form
         # ex. '2020-08-21...' in DateTimeField becomes datetime.datetime
+        obj.save()
         return self.model.objects.get(pk=obj.pk)
 
     def assert_pk_specified(self, **kwargs):
