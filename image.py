@@ -17,7 +17,7 @@ def image_field_response(image_field):
 
 def create_thumbnail(image_field):
     from PIL import Image
-    im = Image.open(image_field.url)
+    im = Image.open(image_field.file.name)
     width, height = im.size
     factor = max(width / 128, height / 128)
     resized = im.resize(
@@ -27,7 +27,7 @@ def create_thumbnail(image_field):
     buffer = io.BytesIO()
     resized.save(buffer, 'png')
     path = default_storage.save(
-        f'{image_field.url.split(".")[0]}_thumb.png',
+        f'{image_field.file.name.split(".")[0]}_thumb.png',
         ContentFile(buffer.getvalue())
     )
     return path
