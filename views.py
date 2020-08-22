@@ -13,15 +13,16 @@ class PublicError(SuspiciousOperation):
     pass
 
 class JsonBaseView(View):
+    _form_data = None
     @property
     def form_data(self):
-        standard_params = MultiValueDict({
-            **self.request.GET,
-            **self.request.POST,
-            **self.request.FILES
-        })
-        return standard_params
-        # return json.loads(self.request.body)
+        if self._form_data is None:
+            self._form_data = MultiValueDict({
+                **self.request.GET,
+                **self.request.POST,
+                **self.request.FILES
+            })
+        return self._form_data
 
     def raise_public_error(self, message):
         raise PublicError(message)
