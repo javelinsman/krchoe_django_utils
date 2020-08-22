@@ -31,3 +31,12 @@ def create_thumbnail(image_field):
         ContentFile(buffer.getvalue())
     )
     return path
+
+def save_pil_image(pil_image, filepath):
+    buffer = io.BytesIO()
+    pil_image.save(buffer, 'png')
+    path = default_storage.save(
+        filepath,
+        ContentFile(buffer.getvalue())
+    )
+    return path
